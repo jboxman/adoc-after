@@ -51,6 +51,9 @@ const data = fs.readFileSync(path.join(repoDir, '_topic_map.yml'), { encoding: '
 const sections = data.split(/---\n/).slice(1);
 const buckets = sections.map(section => yaml.load(section));
 
+//fs.mkdirSync('build');
+
+// TODO: Finds buckets from YAML, but does not descend YAML tree itself
 for(const { Dir: bucketDir, Name: name } of buckets) {
   const src = path.join(repoDir, bucketDir);
   const assemblies = dir.files(src, { sync: true })
@@ -66,28 +69,24 @@ for(const { Dir: bucketDir, Name: name } of buckets) {
     if(!output[name][assemblyName])
       output[name][assemblyName] = [];
 
-    class TemplateConverter {
-      constructor() {
-        this.baseConverter = adoctor.Html5Converter.$new();
-      }
-    
-      convert(node, transform) {
-        if(node.getNodeName() == 'listing' && (onlyLang('terminal')(node))) {
-          const content = node.getContent();
-          if(/\$\s+oc/.test(content)) {
-            if(!ignoreRegex.test(content)) {
-              capturedBlocks.push(makeCodeBlock(node));
-            }
+    let doc;
+    try {
+      // For ifeval::[{release} >= 4.5]
+      // >=: undefined method `>=' for nil
+      doc = adoctor.loadFile(assembly, asciidocOptions);
+      doc.convert();
+
+      console.log(doc.getTitle());
+      const blocks = doc.findBy({ context: 'listing' }, onlyLang('terminal'));
+      if(blocks.length > 0) {
+        if(/\$\s+oc/.test(content)) {
+          if(!ignoreRegex.test(content)) {
+            capturedBlocks.push(makeCodeBlock(node));
           }
         }
-        return this.baseConverter.convert(node, transform);
       }
     }
-
-    adoctor.ConverterFactory.register(new TemplateConverter(), ['html5']);
-
-    const doc = adoctor.loadFile(assembly, asciidocOptions);
-    doc.convert();
+    catch(e) {}
 
     output[name][assemblyName].push(...capturedBlocks);
   }
