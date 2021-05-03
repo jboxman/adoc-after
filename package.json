@@ -10,7 +10,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "asciidoctor": "^2.1.1",
+    "asciidoctor": "^2.2.4",
     "ent": "^2.2.0",
     "js-yaml": "^4.0.0",
     "node-dir": "^0.1.17"
