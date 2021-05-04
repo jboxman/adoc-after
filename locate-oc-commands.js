@@ -8,6 +8,9 @@ const entities = require('ent');
 const asciidoctor = require(`asciidoctor`);
 
 const repoDir = process.argv[2];
+const includeBuckets = [
+  'authentication', 'builds', 'loggin', 'machine_management', 'monitoring',
+  'nodes', 'web_console', 'networking'];
 
 /*
 :data-uri:
@@ -51,61 +54,66 @@ const data = fs.readFileSync(path.join(repoDir, '_topic_map.yml'), { encoding: '
 const sections = data.split(/---\n/).slice(1);
 const buckets = sections.map(section => yaml.load(section));
 
-//fs.mkdirSync('build');
+if(!fs.existsSync('build')) fs.mkdirSync('build');
 
 // TODO: Finds buckets from YAML, but does not descend YAML tree itself
 for(const { Dir: bucketDir, Name: name } of buckets) {
+  if(!includeBuckets.includes(bucketDir)) continue;
+
   const src = path.join(repoDir, bucketDir);
   const assemblies = dir.files(src, { sync: true })
+    .filter(file => !/\/modules/.test(file))
     .filter(file => /\.adoc/.test(file));
 
-  output[name] = {};
+  output[name] = [];
+
+  const targetFile = `build/${bucketDir}.adoc`;
 
   for(const assembly of assemblies) {
     const capturedBlocks = [];
-    const assemblyName = `${assembly.replace(`${repoDir}/`, '')}`;
     const adoctor = asciidoctor();
-
-    if(!output[name][assemblyName])
-      output[name][assemblyName] = [];
+    const obj = {};
 
     let doc;
     try {
+      console.log(`Processing ${assembly.replace(`${repoDir}/`, '')}`);
       // For ifeval::[{release} >= 4.5]
       // >=: undefined method `>=' for nil
       doc = adoctor.loadFile(assembly, asciidocOptions);
       doc.convert();
 
-      console.log(doc.getTitle());
+      obj['title'] = doc.getTitle();
+
       const blocks = doc.findBy({ context: 'listing' }, onlyLang('terminal'));
       if(blocks.length > 0) {
-        if(/\$\s+oc/.test(content)) {
-          if(!ignoreRegex.test(content)) {
-            capturedBlocks.push(makeCodeBlock(node));
-          }
+        for(const node of blocks) {
+          if(/\$\s+oc/.test(node.getContent())) {
+            if(!ignoreRegex.test(node.getContent())) {
+              capturedBlocks.push(makeCodeBlock(node));
+            }
+          }  
         }
       }
     }
-    catch(e) {}
+    catch(e) {
+      console.log(e);
+    }
 
-    output[name][assemblyName].push(...capturedBlocks);
+    obj['data'] = capturedBlocks;
+    output[name].push(obj);
   }
-}
 
-console.log('toc::[]\n');
-for(const [ bucketName, obj ] of Object.entries(output)) {
-  if(!Object.values(obj).some(v => v.length > 0))
-    continue;
+  for(const obj of output[name]) {
+    if(obj['data'].length <= 0) continue;
 
-  if(Object.keys(obj).length <= 0)
-    continue;
+    if(!fs.existsSync(targetFile)) {
+      fs.writeFileSync(targetFile, `= ${name}\n\ntoc::[]\n\n`, { flag: 'w' });
+    }
 
-  console.log(`# ${bucketName}`);
-  for(const [ bucketItem, ary ] of Object.entries(obj)) {
-    if(ary.length <= 0)
-      continue;
-
-      console.log(`## ${bucketItem}`);
-    ary.forEach(block => console.log(block));
+    fs.writeFileSync(
+      targetFile,
+      [`\n## ${obj['title']}`, ...obj['data']].join(`\n`),
+      { flag: 'a' });
   }
+
 }
