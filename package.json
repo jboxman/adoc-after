@@ -13,9 +13,15 @@
   "license": "ISC",
   "dependencies": {
     "asciidoctor": "^2.2.4",
+    "bindings": "^1.5.0",
+    "commander": "^8.0.0",
+    "dictionary-en": "^3.1.0",
     "ent": "^2.2.0",
+    "eol": "^0.9.1",
     "js-yaml": "^4.0.0",
-    "node-dir": "^0.1.17"
+    "node-dir": "^0.1.17",
+    "nodehun": "^3.0.2",
+    "string-strip-html": "^8.3.0"
   },
   "devDependencies": {
     "rimraf": "^3.0.2"
