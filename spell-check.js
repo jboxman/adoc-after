@@ -27,10 +27,13 @@ asciidoctor.LoggerManager.setLogger(memoryLogger);
 const asciidocOptions = {
   doctype: 'article',
   safe: 'unsafe',
-  sourcemap: true
+  sourcemap: true,
+  attributes: {
+    'openshift-enterprise': ''
+  }
 };
 const stripHtmlOptions = {
-  stripTogetherWithTheirContents: ['code']
+  stripTogetherWithTheirContents: ['code', 'pre']
 };
 
 program
@@ -39,51 +42,82 @@ program
   .option('--topic <path>', 'Optional: Path to _topic_map.yml file')
   .action(main);
 
+const getLines = content => {
+  //console.log(content);
+  const stripped = stripHtml(content, stripHtmlOptions).result;
+  const lines = eol.split(stripped).reduce((a, line) => {
+    if(line) {
+      // TODO - Is this too aggressive?
+      const words = line.match(/[a-z]{2,}/gi);
+      if(words) {
+        // Skip acronyms
+        const lcWords = words
+          .filter(v => v != v.toLocaleUpperCase())
+          .map(v => v.toLocaleLowerCase());
+        a.push(...lcWords);
+      }
+    }
+
+    return a;
+  }, []);  
+  return lines;
+}
+
+// getContent() is for blocks
+// getText() is for list items (all list items?)
+
+// Based on:
+// https://github.com/seikichi/textlint-plugin-asciidoctor/blob/master/src/parse.js
+
 const getAllNodes = node => {
   const all = [];
-  if(node.blocks.length > 0) {
-    for(const block of node.blocks) {
-      // backup_and_restore/disaster_recovery/about-disaster-recovery.adoc
-      // Array.isArray(block) == true
-      if(! block.getContent) {
-        console.error('Cannot get content block!');
-        continue;
-      }
-      if(typeof block.getContent() == 'object') {
-        all.push(...getAllNodes(block));
-      }
-      // TODO - line counting doesn't work
-      else {
-        const { dir, file, path, lineno } = block.source_location;
-        const content = block.getContent();
-        const stripped = stripHtml(content, stripHtmlOptions).result;
-        const lines = eol.split(stripped).reduce((a, line, idx) => {
-          if(line) {
-            const words = line.match(/[a-z]{2,}/gi);
-            if(words) {
-              const lcWords = words.map(v => v.toLocaleLowerCase());
-              a.push({
-                words: lcWords,
-                idx
-              });
-            }
+  const allowedContexts = [
+    // 'listing',
+    'document', 'preamble', 'paragraph', 'list_item', 'quote',
+    'section', 'table', 'admonition'
+  ];
+
+  //console.log(node.context);
+
+  // Unique behavior
+  if(node.context == 'dlist') {
+    const text = node.$blocks().map(([terms, item]) => [...terms, item]).reduce((v, accum) => {accum.push(...v); return accum;}, []).map(v => v.getText ? v.getText() : '').join(' ');
+    all.push(...getLines(text));
+    return all;
+  }
+  if(node.context == 'ulist' || node.context == 'olist') {
+    for(const li of node.$blocks()) {
+      all.push(...getLines(li.getText()));
+      return all;
+    }
+  }
+  if(node.context == 'table') {
+    for(const row of node.$rows().$body()) {
+      for(const cell of row) {
+        if(cell.style == 'asciidoc') {
+          for(const block of cell.$inner_document().$blocks()) {
+            all.push(...getAllNodes(block));
           }
-
-          return a;
-        }, []);
-
-        for(const { words, idx } of lines) {
-          for(const word of words) {
-            const correct = hunspell.spellSync(word);
-            //if(!correct) console.log(`[${path}:${lineno}] Mispelled: ${word}`);
-            if(!correct) console.error(`${word}`);
-          }  
         }
-
-        //all.push(matches);
+        else {
+          all.push(...getLines(cell.getText()));
+        }
       }
     }
   }
+
+  if(!allowedContexts.includes(node.context)) return all;
+
+  const { dir, file, path, lineno } = node.source_location;
+  if(!['document', 'section', 'preamble'].includes(node.context)) {
+    const lines = getLines(node.getContent());
+    all.push(...lines);  
+  }
+
+  for(const block of node.$blocks()) {
+    all.push(...getAllNodes(block));
+  }
+
   return all;
 }
 
@@ -124,9 +158,23 @@ function main(options = {}, cmd = {}) {
         console.error(e.message);
       }
       doc.convert();
-      getAllNodes(doc);
+      const output = getAllNodes(doc);
+
+      for(const word of output) {
+        //for(const word of words) {
+          const correct = hunspell.spellSync(word);
+          //if(!correct) console.log(`[${path}:${lineno}] Mispelled: ${word}`);
+          if(!correct) console.log(`${word}`);
+        //}  
+      }
+
+      /*
+      for(const word of output) {
+        console.error(word);
+      }
+      */
     }
-  }  
+  }
 }
 
 // TODO
@@ -134,8 +182,11 @@ function main(options = {}, cmd = {}) {
 // Add --incorrect-only
 // Add CSV format
 // Add --only for specific assembly?
-// Add autodetect _topic_map; This matters for base_dir in particular
-// Add custom logger to get rid of annoying warnings
+// Add skip single word table cell/definition list for testing
+// Add specific context to exclude tables, or lists, or whatever
+// Add pass in for necessary attributes, maybe with config
 // Need {product-version} for some conditionals passed in optionally
+// Contractions (aren't, ect.) are currently stripped
+// Are these words? x86_64, amd64, s390x, ppc64le
 
 program.parse(process.argv);
