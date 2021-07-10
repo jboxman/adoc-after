@@ -21,6 +21,7 @@ const dict = Buffer.from(fs.readFileSync(fsPath.join(fsPath.dirname(base), 'inde
 
 const hunspell = new Nodehun(af, dict);
 
+// This silences all warnings and errors. Asciidoc assumed to be valid.
 const memoryLogger = asciidoctor.MemoryLogger.create();
 asciidoctor.LoggerManager.setLogger(memoryLogger);
 
@@ -38,7 +39,7 @@ const stripHtmlOptions = {
 
 program
   //.arguments('')
-  .description('')
+  .description('Check US English spelling in Asciidoc files')
   .option('--topic <path>', 'Optional: Path to _topic_map.yml file')
   .action(main);
 
@@ -47,11 +48,12 @@ const getLines = content => {
   const stripped = stripHtml(content, stripHtmlOptions).result;
   const lines = eol.split(stripped).reduce((a, line) => {
     if(line) {
-      // TODO - Is this too aggressive?
-      const words = line.match(/[a-z]{2,}/gi);
+      // Can't include ' for contractions because that leads to unhelpful splits
+      const words = line.split(/\W+/);
       if(words) {
         // Skip acronyms
         const lcWords = words
+          .filter(v => v.length > 1)
           .filter(v => v != v.toLocaleUpperCase())
           .map(v => v.toLocaleLowerCase());
         a.push(...lcWords);
@@ -59,7 +61,7 @@ const getLines = content => {
     }
 
     return a;
-  }, []);  
+  }, []);
   return lines;
 }
 
@@ -76,8 +78,6 @@ const getAllNodes = node => {
     'document', 'preamble', 'paragraph', 'list_item', 'quote',
     'section', 'table', 'admonition'
   ];
-
-  //console.log(node.context);
 
   // Unique behavior
   if(node.context == 'dlist') {
@@ -100,7 +100,11 @@ const getAllNodes = node => {
           }
         }
         else {
-          all.push(...getLines(cell.getText()));
+          // Temporary skip single word cells;
+          // Many of these ought to be in code font, but are not.
+          if(!/^\w+$/.test(cell.getText())) {
+            all.push(...getLines(cell.getText()));
+          }
         }
       }
     }
@@ -161,18 +165,10 @@ function main(options = {}, cmd = {}) {
       const output = getAllNodes(doc);
 
       for(const word of output) {
-        //for(const word of words) {
-          const correct = hunspell.spellSync(word);
-          //if(!correct) console.log(`[${path}:${lineno}] Mispelled: ${word}`);
-          if(!correct) console.log(`${word}`);
-        //}  
+        const correct = hunspell.spellSync(word);
+        //if(!correct) console.log(`[${path}:${lineno}] Mispelled: ${word}`);
+        if(!correct) console.log(`${word}`);
       }
-
-      /*
-      for(const word of output) {
-        console.error(word);
-      }
-      */
     }
   }
 }
@@ -185,6 +181,7 @@ function main(options = {}, cmd = {}) {
 // Add skip single word table cell/definition list for testing
 // Add specific context to exclude tables, or lists, or whatever
 // Add pass in for necessary attributes, maybe with config
+// Add exclude regex list for quantities, such as 8GB, 500m, ect.
 // Need {product-version} for some conditionals passed in optionally
 // Contractions (aren't, ect.) are currently stripped
 // Are these words? x86_64, amd64, s390x, ppc64le
