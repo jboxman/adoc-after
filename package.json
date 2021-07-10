@@ -21,7 +21,8 @@
     "js-yaml": "^4.0.0",
     "node-dir": "^0.1.17",
     "nodehun": "^3.0.2",
-    "string-strip-html": "^8.3.0"
+    "string-strip-html": "^8.3.0",
+    "striptags": "^3.2.0"
   },
   "devDependencies": {
     "rimraf": "^3.0.2"
