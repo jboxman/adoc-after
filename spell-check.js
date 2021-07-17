@@ -11,7 +11,7 @@ const base = require.resolve('dictionary-en');
 const Nodehun = require('bindings')({
   "bindings": "nodehun",
   // TODO - fix
-  "module_root": process.cwd() + "/node_modules/nodehun"
+  "module_root": __dirname + "/node_modules/nodehun"
 });
 
 const { walkTopics } = require('./lib');
@@ -43,7 +43,7 @@ program
   .option('--topic <path>', 'Optional: Path to _topic_map.yml file')
   .action(main);
 
-const getLines = content => {
+const getWords = content => {
   //console.log(content);
   const stripped = stripHtml(content, stripHtmlOptions).result;
   const lines = eol.split(stripped).reduce((a, line) => {
@@ -72,6 +72,7 @@ const getLines = content => {
 // https://github.com/seikichi/textlint-plugin-asciidoctor/blob/master/src/parse.js
 
 const getAllNodes = node => {
+  const { dir, file, path, lineno } = node.source_location;
   const all = [];
   const allowedContexts = [
     // 'listing',
@@ -82,12 +83,12 @@ const getAllNodes = node => {
   // Unique behavior
   if(node.context == 'dlist') {
     const text = node.$blocks().map(([terms, item]) => [...terms, item]).reduce((v, accum) => {accum.push(...v); return accum;}, []).map(v => v.getText ? v.getText() : '').join(' ');
-    all.push(...getLines(text));
+    all.push({ path, lineno, words: getWords(text) });
     return all;
   }
   if(node.context == 'ulist' || node.context == 'olist') {
     for(const li of node.$blocks()) {
-      all.push(...getLines(li.getText()));
+      all.push({ path, lineno, words: getWords(li.getText()) });
       return all;
     }
   }
@@ -103,7 +104,7 @@ const getAllNodes = node => {
           // Temporary skip single word cells;
           // Many of these ought to be in code font, but are not.
           if(!/^\w+$/.test(cell.getText())) {
-            all.push(...getLines(cell.getText()));
+            all.push({ path, lineno, words: getWords(cell.getText()) });
           }
         }
       }
@@ -112,10 +113,9 @@ const getAllNodes = node => {
 
   if(!allowedContexts.includes(node.context)) return all;
 
-  const { dir, file, path, lineno } = node.source_location;
   if(!['document', 'section', 'preamble'].includes(node.context)) {
-    const lines = getLines(node.getContent());
-    all.push(...lines);  
+    const words = getWords(node.getContent());
+    all.push({ path, lineno, words });
   }
 
   for(const block of node.$blocks()) {
@@ -139,7 +139,7 @@ function main(options = {}, cmd = {}) {
   if(fs.existsSync(localDictPath)) {
     const dict = fs.readFileSync(localDictPath, { encoding: 'utf8' });
     const words = eol.split(dict);
-    for(const word of words) {
+    for(const word of words.filter(v => !/^(#|\s)/.test(v))) {
       if(word) hunspell.add(word);
     }
   }
@@ -162,12 +162,14 @@ function main(options = {}, cmd = {}) {
         console.error(e.message);
       }
       doc.convert();
-      const output = getAllNodes(doc);
+      const wordGroups = getAllNodes(doc);
 
-      for(const word of output) {
-        const correct = hunspell.spellSync(word);
-        //if(!correct) console.log(`[${path}:${lineno}] Mispelled: ${word}`);
-        if(!correct) console.log(`${word}`);
+      for(const { path, lineno, words } of wordGroups) {
+        for(const word of words) {
+          const correct = hunspell.spellSync(word);
+          if(!correct) console.log(`[${path}:${lineno}] Mispelled: ${word}`);
+          //if(!correct) console.log(`${word}`);
+        }
       }
     }
   }
