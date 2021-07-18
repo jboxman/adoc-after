@@ -1,0 +1,8 @@
+ignoreList:
+- \d+(s|m|h|ms|kb|mb|pm|am|kib|gib|mib|gi|mi|ki)
+- (G|K|M)iB
+- |-
+  [A-Z]+s?
+- v\d(\.\d+)?
+- |-
+  {[A-Za-z-]+}
