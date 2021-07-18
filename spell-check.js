@@ -37,22 +37,24 @@ const stripHtmlOptions = {
 program
   .description('Check US English spelling in Asciidoc files')
   .option('--topic <path>', 'Optional: Path to _topic_map.yml file')
+  .option('-c, --config <spell.yaml>', 'Optional: Path to config file')
   .option('-a, --attributes [attributes...]', 'Optional: Attributes such as product-version=1')
   .action(main);
 
-const getWords = content => {
+const getWords = (content, ignoreList = []) => {
   //console.log(content);
+  const transforms = [
+    words => words.filter(v => v.length > 1),
+    words => words.filter(v => !ignoreList.some(regexp => regexp.test(v))),
+    words => words.map(v => v.toLocaleLowerCase())
+  ];
   const stripped = stripHtml(content, stripHtmlOptions).result;
   const lines = eol.split(stripped).reduce((a, line) => {
     if(line) {
       // Can't include ' for contractions because that leads to unhelpful splits
       const words = line.split(/\W+/);
       if(words) {
-        // Skip acronyms
-        const lcWords = words
-          .filter(v => v.length > 1)
-          .filter(v => v != v.toLocaleUpperCase())
-          .map(v => v.toLocaleLowerCase());
+        const lcWords = transforms.reduce((s, fn) => fn(s), words);
         a.push(...lcWords);
       }
     }
@@ -68,7 +70,8 @@ const getWords = content => {
 // Based on:
 // https://github.com/seikichi/textlint-plugin-asciidoctor/blob/master/src/parse.js
 
-const getAllNodes = node => {
+const getAllNodes = (node, config = {}) => {
+  const { ignoreList } = config;
   const { dir, file, path, lineno } = node.source_location;
   const all = [];
   const allowedContexts = [
@@ -80,12 +83,12 @@ const getAllNodes = node => {
   // Unique behavior
   if(node.context == 'dlist') {
     const text = node.$blocks().map(([terms, item]) => [...terms, item]).reduce((v, accum) => {accum.push(...v); return accum;}, []).map(v => v.getText ? v.getText() : '').join(' ');
-    all.push({ path, lineno, words: getWords(text) });
+    all.push({ path, lineno, words: getWords(text, ignoreList) });
     return all;
   }
   if(node.context == 'ulist' || node.context == 'olist') {
     for(const li of node.$blocks()) {
-      all.push({ path, lineno, words: getWords(li.getText()) });
+      all.push({ path, lineno, words: getWords(li.getText(), ignoreList) });
       return all;
     }
   }
@@ -94,14 +97,14 @@ const getAllNodes = node => {
       for(const cell of row) {
         if(cell.style == 'asciidoc') {
           for(const block of cell.$inner_document().$blocks()) {
-            all.push(...getAllNodes(block));
+            all.push(...getAllNodes(block, config));
           }
         }
         else {
           // Temporary skip single word cells;
           // Many of these ought to be in code font, but are not.
           if(!/^\w+$/.test(cell.getText())) {
-            all.push({ path, lineno, words: getWords(cell.getText()) });
+            all.push({ path, lineno, words: getWords(cell.getText(), ignoreList) });
           }
         }
       }
@@ -111,20 +114,22 @@ const getAllNodes = node => {
   if(!allowedContexts.includes(node.context)) return all;
 
   if(!['document', 'section', 'preamble'].includes(node.context)) {
-    const words = getWords(node.getContent());
+    const words = getWords(node.getContent(), ignoreList);
     all.push({ path, lineno, words });
   }
 
   for(const block of node.$blocks()) {
-    all.push(...getAllNodes(block));
+    all.push(...getAllNodes(block, config));
   }
 
   return all;
 }
 
 function main(options = {}, cmd = {}) {
+  let config, data;
   const localDictPath = fsPath.join(process.cwd(), 'local.dict');
-  const topicPath = options.topic ? options.topic : fsPath.join(process.cwd(), '_topic_map.yml'); 
+  const configPath = options.config ? options.config : fsPath.join(process.cwd(), 'spell.yaml');
+  const topicPath = options.topic ? options.topic : fsPath.join(process.cwd(), '_topic_map.yml');
 
   const attributes = (options.attributes || []).reduce((accum, pair) => {
     if(/^[A-Za-z0-9-]+=?[A-Za-z0-9-.]*$/.test(pair)) {
@@ -138,6 +143,40 @@ function main(options = {}, cmd = {}) {
   }, {});
 
   console.log(Object.entries(attributes).reduce((accum, [k, v]) => accum += `${k}=${v} `, 'Attributes: '));
+
+  if(fs.existsSync(configPath)) {
+    const configFileData = fs.readFileSync(configPath, { encoding: 'utf8' });
+    try {
+      data = yaml.load(configFileData);
+    }
+    catch(e) {
+      console.error(e.message);
+      process.exit(1);
+    }
+
+    const toRegexp = s => {
+      let r = false;
+      try {
+        r = new RegExp(`^${s}$`);
+      }
+      catch(e) {
+        console.log(e.message);
+      }
+      return r;
+    };
+
+    const fromFile = ({
+      ignoreList = [],
+      ...rest
+    } = {}) => ({
+      ignoreList: ignoreList.reduce((l, r) => toRegexp(r) ? l.concat(toRegexp(r)) : l, [])
+    });
+
+    config = Object.assign({}, fromFile(data));
+  }
+  else {
+    process.exit(1);
+  }
 
   if(fs.existsSync(topicPath)) {
     data = fs.readFileSync(topicPath, { encoding: 'utf8' });
@@ -176,7 +215,7 @@ function main(options = {}, cmd = {}) {
         console.error(e.message);
       }
       doc.convert();
-      const wordGroups = getAllNodes(doc);
+      const wordGroups = getAllNodes(doc, config);
 
       for(const { path, lineno, words } of wordGroups) {
         for(const word of words) {
