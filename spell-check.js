@@ -193,11 +193,8 @@ function main(options = {}, cmd = {}) {
 // Add --incorrect-only
 // Add CSV format
 // Add --only for specific assembly?
-// Add skip single word table cell/definition list for testing
 // Add specific context to exclude tables, or lists, or whatever
-// Add pass in for necessary attributes, maybe with config
 // Add exclude regex list for quantities, such as 8GB, 500m, ect.
-// Need {product-version} for some conditionals passed in optionally
 // Contractions (aren't, ect.) are currently stripped
 // Are these words? x86_64, amd64, s390x, ppc64le
 
