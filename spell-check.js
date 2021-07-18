@@ -28,19 +28,16 @@ asciidoctor.LoggerManager.setLogger(memoryLogger);
 const asciidocOptions = {
   doctype: 'article',
   safe: 'unsafe',
-  sourcemap: true,
-  attributes: {
-    'openshift-enterprise': ''
-  }
+  sourcemap: true
 };
 const stripHtmlOptions = {
   stripTogetherWithTheirContents: ['code', 'pre']
 };
 
 program
-  //.arguments('')
   .description('Check US English spelling in Asciidoc files')
   .option('--topic <path>', 'Optional: Path to _topic_map.yml file')
+  .option('-a, --attributes [attributes...]', 'Optional: Attributes such as product-version=1')
   .action(main);
 
 const getWords = content => {
@@ -127,10 +124,23 @@ const getAllNodes = node => {
 
 function main(options = {}, cmd = {}) {
   const localDictPath = fsPath.join(process.cwd(), 'local.dict');
-  const topicPath = options.topic ? options.topic : fsPath.join(process.cwd(), '_topic_map.yml');
+  const topicPath = options.topic ? options.topic : fsPath.join(process.cwd(), '_topic_map.yml'); 
+
+  const attributes = (options.attributes || []).reduce((accum, pair) => {
+    if(/^[A-Za-z0-9-]+=?[A-Za-z0-9-.]*$/.test(pair)) {
+      const els = pair.split(/=/);
+      return {
+        ...accum,
+        [els[0]]: els.length == 2 ? els[1] : ''
+      };
+    }
+    return accum;
+  }, {});
+
+  console.log(Object.entries(attributes).reduce((accum, [k, v]) => accum += `${k}=${v} `, 'Attributes: '));
 
   if(fs.existsSync(topicPath)) {
-    data = fs.readFileSync(topicPath, { encoding: 'utf8'} );
+    data = fs.readFileSync(topicPath, { encoding: 'utf8' });
   }
   else {
     process.exit(1);
@@ -156,7 +166,11 @@ function main(options = {}, cmd = {}) {
       const inputPath = fsPath.join(fsPath.dirname(topicPath), `${path}.adoc`);
       console.log(`Scanning ${inputPath}`);
       try {
-        doc = asciidoctor.loadFile(inputPath, { ...asciidocOptions, base_dir: fsPath.dirname(inputPath) });
+        doc = asciidoctor.loadFile(inputPath, {
+          ...asciidocOptions,
+          attributes: { ...attributes },
+          base_dir: fsPath.dirname(inputPath)
+        });
       }
       catch(e) {
         console.error(e.message);
@@ -168,7 +182,6 @@ function main(options = {}, cmd = {}) {
         for(const word of words) {
           const correct = hunspell.spellSync(word);
           if(!correct) console.log(`[${path}:${lineno}] Mispelled: ${word}`);
-          //if(!correct) console.log(`${word}`);
         }
       }
     }
